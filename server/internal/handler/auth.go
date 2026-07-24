@@ -3,7 +3,6 @@ package handler
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"scrauto/server/internal/auth"
 	"scrauto/server/internal/middleware"
@@ -81,12 +80,12 @@ func (h *AuthHandler) Me(c *gin.Context) {
 }
 
 func (h *AuthHandler) respondWithToken(c *gin.Context, user *model.User) {
-	token, err := auth.IssueToken(h.JWTSecret, user.ID, user.Email, 7*24*time.Hour)
+	token, err := auth.IssueToken(h.JWTSecret, user.ID, user.Email, auth.TokenTTL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
 		return
 	}
-	c.SetCookie("token", token, int((7 * 24 * time.Hour).Seconds()), "/", "", false, true)
+	c.SetCookie("token", token, int(auth.TokenTTL.Seconds()), "/", "", false, true)
 	c.JSON(http.StatusOK, gin.H{
 		"token": token,
 		"user": gin.H{

@@ -224,7 +224,12 @@ func (h *ScoreHandler) Update(c *gin.Context) {
 			return
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"score": score})
+	updated, err := h.Store.FindScore(userID, id)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"score": score})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"score": updated})
 }
 
 func (h *ScoreHandler) Delete(c *gin.Context) {

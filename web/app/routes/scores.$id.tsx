@@ -23,6 +23,7 @@ export function meta({}: Route.MetaArgs) {
 export default function ScoreShowPage() {
   const { id } = useParams();
   const [score, setScore] = useState<Score | null>(null);
+  const [folderName, setFolderName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const { playing, togglePlaying, speed, setSpeed, scrollerProps } = useAutoScroll({
@@ -37,6 +38,18 @@ export default function ScoreShowPage() {
         const res = await api.getScore(id);
         setScore(res.score);
         setSpeed(clampScrollSpeed(res.score.scroll_speed));
+
+        let resolvedFolderName: string | null = null;
+        if (res.score.folder_id != null) {
+          const foldersRes = await api.listFolders();
+          resolvedFolderName =
+            foldersRes.folders.find((f) => f.id === res.score.folder_id)?.name ??
+            null;
+        }
+        setFolderName(resolvedFolderName);
+        document.title = resolvedFolderName
+          ? `${resolvedFolderName} / ${res.score.title} — ScrAuto`
+          : `${res.score.title} — ScrAuto`;
 
         const fileRes = await fetch(api.scoreFileUrl(id), {
           headers: api.authHeaders(),
@@ -76,7 +89,16 @@ export default function ScoreShowPage() {
               ← 一覧へ
             </Link>
             <h1 className="font-display mt-1 text-3xl font-bold">
-              {score?.title ?? "読み込み中..."}
+              {score ? (
+                <>
+                  {folderName && (
+                    <span className="opacity-65">{folderName} / </span>
+                  )}
+                  {score.title}
+                </>
+              ) : (
+                "読み込み中..."
+              )}
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-3">

@@ -14,6 +14,8 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+const TokenTTL = 7 * 24 * time.Hour
+
 func HashPassword(password string) (string, error) {
 	b, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	return string(b), err
