@@ -14,6 +14,7 @@ import {
   useAutoScroll,
 } from "../hooks/useAutoScroll";
 import { api, type Score } from "../lib/api";
+import { cropVerticalMargins } from "../lib/crop-vertical-margins";
 import { queryKeys } from "../lib/query-keys";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -239,12 +240,13 @@ function PdfPages({ blob }: { blob: Blob }) {
           const page = await doc.getPage(i);
           const viewport = page.getViewport({ scale: 1.5 });
           const canvas = document.createElement("canvas");
-          const ctx = canvas.getContext("2d");
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
           if (!ctx) continue;
           canvas.width = viewport.width;
           canvas.height = viewport.height;
           await page.render({ canvasContext: ctx, viewport }).promise;
-          urls.push(canvas.toDataURL("image/jpeg", 0.92));
+          const cropped = cropVerticalMargins(canvas);
+          urls.push(cropped.toDataURL("image/jpeg", 0.92));
         }
         if (!cancelled) setPages(urls);
       } catch (err) {
@@ -266,14 +268,14 @@ function PdfPages({ blob }: { blob: Blob }) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4">
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-1 p-4">
       {pages.map((src, i) => (
         <img
           key={i}
           src={src}
           alt={`page ${i + 1}`}
           draggable={false}
-          className="pointer-events-none w-full shadow-sm"
+          className="pointer-events-none w-full"
         />
       ))}
     </div>
