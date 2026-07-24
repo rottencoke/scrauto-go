@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router";
+import { useParams } from "react-router";
 import * as pdfjs from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
@@ -26,6 +26,7 @@ export default function ScoreShowPage() {
   const { id } = useParams();
   const queryClient = useQueryClient();
   const scoreId = id ?? "";
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
 
   const scoreQuery = useQuery({
     queryKey: queryKeys.score(scoreId),
@@ -52,19 +53,20 @@ export default function ScoreShowPage() {
       ? (foldersQuery.data?.find((f) => f.id === score.folder_id)?.name ?? null)
       : null;
 
-  const objectUrl = useMemo(() => {
-    if (!fileQuery.data) return null;
-    return URL.createObjectURL(fileQuery.data);
+  useEffect(() => {
+    if (!fileQuery.data) {
+      setObjectUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(fileQuery.data);
+    setObjectUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
   }, [fileQuery.data]);
 
-  useEffect(() => {
-    return () => {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [objectUrl]);
-
   const { playing, togglePlaying, speed, setSpeed, scrollerProps } = useAutoScroll({
-    enabled: Boolean(objectUrl),
+    enabled: Boolean(fileQuery.data),
   });
 
   useEffect(() => {
@@ -128,10 +130,7 @@ export default function ScoreShowPage() {
       <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col px-5 pb-6">
         <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
           <div>
-            <Link to="/scores" className="text-sm text-white/70 hover:text-white">
-              ← 一覧へ
-            </Link>
-            <div className="mt-1 flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <h1 className="font-display text-3xl font-bold">
                 {score ? (
                   <>
@@ -192,7 +191,7 @@ export default function ScoreShowPage() {
               type="button"
               className="btn btn-primary py-2 text-sm"
               onClick={togglePlaying}
-              disabled={!objectUrl}
+              disabled={!fileQuery.data}
             >
               {playing ? "停止" : "自動スクロール開始"}
             </button>
@@ -205,8 +204,8 @@ export default function ScoreShowPage() {
           {...scrollerProps}
           className="surface relative min-h-0 flex-1 cursor-pointer overflow-y-auto rounded-2xl select-none"
         >
-          {objectUrl && score?.mime_type === "application/pdf" && (
-            <PdfPages url={objectUrl} />
+          {fileQuery.data && score?.mime_type === "application/pdf" && (
+            <PdfPages blob={fileQuery.data} />
           )}
           {objectUrl && score?.mime_type.startsWith("image/") && (
             <img
@@ -216,7 +215,7 @@ export default function ScoreShowPage() {
               className="pointer-events-none mx-auto block w-full max-w-4xl"
             />
           )}
-          {!objectUrl && !error && (
+          {!fileQuery.data && !error && (
             <p className="p-10 text-center opacity-60">ファイルを読み込み中...</p>
           )}
         </div>
@@ -225,7 +224,7 @@ export default function ScoreShowPage() {
   );
 }
 
-function PdfPages({ url }: { url: string }) {
+function PdfPages({ blob }: { blob: Blob }) {
   const [pages, setPages] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -233,7 +232,8 @@ function PdfPages({ url }: { url: string }) {
     let cancelled = false;
     void (async () => {
       try {
-        const doc = await pdfjs.getDocument(url).promise;
+        const data = new Uint8Array(await blob.arrayBuffer());
+        const doc = await pdfjs.getDocument({ data }).promise;
         const urls: string[] = [];
         for (let i = 1; i <= doc.numPages; i++) {
           const page = await doc.getPage(i);
@@ -256,7 +256,7 @@ function PdfPages({ url }: { url: string }) {
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [blob]);
 
   if (error) {
     return <p className="p-8 text-[var(--color-warn)]">{error}</p>;
