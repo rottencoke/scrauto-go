@@ -100,6 +100,35 @@ a {
   outline-offset: 1px;
 }
 
+.field-quiet {
+  width: 3.1rem;
+  flex-shrink: 0;
+  border: 1px solid color-mix(in oklab, currentColor 22%, transparent);
+  border-radius: 0.35rem;
+  padding: 0.15rem 0.3rem;
+  background: color-mix(in oklab, currentColor 8%, transparent);
+  color: inherit;
+  font-size: 0.8125rem;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.field-quiet:focus {
+  outline: 1px solid color-mix(in oklab, var(--color-accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.field-quiet::-webkit-outer-spin-button,
+.field-quiet::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.field-quiet[type="number"] {
+  appearance: textfield;
+}
+
 .label {
   display: block;
   margin-bottom: 0.35rem;

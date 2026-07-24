@@ -1,10 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import * as pdfjs from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 import type { Route } from "./+types/scores.$id";
 import { SiteHeader } from "../components/SiteHeader";
+import {
+  SCROLL_SPEED_MAX,
+  SCROLL_SPEED_MIN,
+  SCROLL_SPEED_STEP,
+  clampScrollSpeed,
+  useAutoScroll,
+} from "../hooks/useAutoScroll";
 import { api, type Score } from "../lib/api";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -15,24 +22,12 @@ export function meta({}: Route.MetaArgs) {
 
 export default function ScoreShowPage() {
   const { id } = useParams();
-  const scrollerRef = useRef<HTMLDivElement>(null);
   const [score, setScore] = useState<Score | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(40);
-  const playingRef = useRef(false);
-  const speedRef = useRef(40);
-  const rafRef = useRef<number | null>(null);
-  const lastTsRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    playingRef.current = playing;
-  }, [playing]);
-
-  useEffect(() => {
-    speedRef.current = speed;
-  }, [speed]);
+  const { playing, togglePlaying, speed, setSpeed, scrollerProps } = useAutoScroll({
+    enabled: Boolean(objectUrl),
+  });
 
   useEffect(() => {
     if (!id) return;
@@ -41,7 +36,7 @@ export default function ScoreShowPage() {
       try {
         const res = await api.getScore(id);
         setScore(res.score);
-        setSpeed(res.score.scroll_speed);
+        setSpeed(clampScrollSpeed(res.score.scroll_speed));
 
         const fileRes = await fetch(api.scoreFileUrl(id), {
           headers: api.authHeaders(),
@@ -59,49 +54,7 @@ export default function ScoreShowPage() {
     return () => {
       if (revoked) URL.revokeObjectURL(revoked);
     };
-  }, [id]);
-
-  const tick = useCallback((ts: number) => {
-    if (!playingRef.current) {
-      lastTsRef.current = null;
-      rafRef.current = null;
-      return;
-    }
-    const el = scrollerRef.current;
-    if (!el) {
-      rafRef.current = requestAnimationFrame(tick);
-      return;
-    }
-    if (lastTsRef.current == null) {
-      lastTsRef.current = ts;
-    } else {
-      const dt = (ts - lastTsRef.current) / 1000;
-      lastTsRef.current = ts;
-      el.scrollTop += speedRef.current * dt;
-      const max = el.scrollHeight - el.clientHeight;
-      if (el.scrollTop >= max - 1) {
-        playingRef.current = false;
-        setPlaying(false);
-        lastTsRef.current = null;
-        rafRef.current = null;
-        return;
-      }
-    }
-    rafRef.current = requestAnimationFrame(tick);
-  }, []);
-
-  useEffect(() => {
-    if (playing) {
-      rafRef.current = requestAnimationFrame(tick);
-    } else if (rafRef.current != null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-      lastTsRef.current = null;
-    }
-    return () => {
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-    };
-  }, [playing, tick]);
+  }, [id, setSpeed]);
 
   async function saveSpeed() {
     if (!id) return;
@@ -114,10 +67,10 @@ export default function ScoreShowPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col text-white">
+    <div className="flex h-dvh flex-col overflow-hidden text-white">
       <SiteHeader />
-      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-5 pb-6">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col px-5 pb-6">
+        <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
           <div>
             <Link to="/scores" className="text-sm text-white/70 hover:text-white">
               ← 一覧へ
@@ -131,13 +84,24 @@ export default function ScoreShowPage() {
               速度
               <input
                 type="range"
-                min={10}
-                max={200}
-                step={5}
+                min={SCROLL_SPEED_MIN}
+                max={SCROLL_SPEED_MAX}
+                step={SCROLL_SPEED_STEP}
                 value={speed}
                 onChange={(e) => setSpeed(Number(e.target.value))}
+                aria-label="スクロール速度（スライダー）"
               />
-              <span className="w-16 tabular-nums">{speed}px/s</span>
+              <input
+                type="number"
+                className="field-quiet"
+                min={SCROLL_SPEED_MIN}
+                max={SCROLL_SPEED_MAX}
+                step={SCROLL_SPEED_STEP}
+                value={speed}
+                onChange={(e) => setSpeed(Number(e.target.value))}
+                aria-label="スクロール速度（数値）"
+              />
+              <span className="text-xs tabular-nums text-white/55">px/s</span>
             </label>
             <button type="button" className="btn btn-ghost py-2 text-sm" onClick={() => void saveSpeed()}>
               速度を保存
@@ -145,19 +109,22 @@ export default function ScoreShowPage() {
             <button
               type="button"
               className="btn btn-primary py-2 text-sm"
-              onClick={() => setPlaying((p) => !p)}
+              onClick={togglePlaying}
               disabled={!objectUrl}
             >
               {playing ? "停止" : "自動スクロール開始"}
             </button>
           </div>
         </div>
+        <p className="mb-3 shrink-0 text-sm text-white/55">
+          楽譜をタップで開始/停止 · ホイールで位置調整（止めると自動スクロール再開）
+        </p>
 
-        {error && <p className="mb-4 text-[var(--color-warn)]">{error}</p>}
+        {error && <p className="mb-4 shrink-0 text-[var(--color-warn)]">{error}</p>}
 
         <div
-          ref={scrollerRef}
-          className="surface relative min-h-[70vh] flex-1 overflow-auto rounded-2xl"
+          {...scrollerProps}
+          className="surface relative min-h-0 flex-1 cursor-pointer overflow-y-auto rounded-2xl select-none"
         >
           {objectUrl && score?.mime_type === "application/pdf" && (
             <PdfPages url={objectUrl} />
@@ -166,7 +133,8 @@ export default function ScoreShowPage() {
             <img
               src={objectUrl}
               alt={score.title}
-              className="mx-auto block w-full max-w-4xl"
+              draggable={false}
+              className="pointer-events-none mx-auto block w-full max-w-4xl"
             />
           )}
           {!objectUrl && !error && (
@@ -184,7 +152,6 @@ function PdfPages({ url }: { url: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    const created: string[] = [];
     void (async () => {
       try {
         const doc = await pdfjs.getDocument(url).promise;
@@ -198,9 +165,7 @@ function PdfPages({ url }: { url: string }) {
           canvas.width = viewport.width;
           canvas.height = viewport.height;
           await page.render({ canvasContext: ctx, viewport }).promise;
-          const pageUrl = canvas.toDataURL("image/jpeg", 0.92);
-          created.push(pageUrl);
-          urls.push(pageUrl);
+          urls.push(canvas.toDataURL("image/jpeg", 0.92));
         }
         if (!cancelled) setPages(urls);
       } catch (err) {
@@ -224,7 +189,13 @@ function PdfPages({ url }: { url: string }) {
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4">
       {pages.map((src, i) => (
-        <img key={i} src={src} alt={`page ${i + 1}`} className="w-full shadow-sm" />
+        <img
+          key={i}
+          src={src}
+          alt={`page ${i + 1}`}
+          draggable={false}
+          className="pointer-events-none w-full shadow-sm"
+        />
       ))}
     </div>
   );

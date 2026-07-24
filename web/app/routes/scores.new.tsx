@@ -3,6 +3,12 @@ import { useNavigate } from "react-router";
 
 import type { Route } from "./+types/scores.new";
 import { SiteHeader } from "../components/SiteHeader";
+import {
+  SCROLL_SPEED_MAX,
+  SCROLL_SPEED_MIN,
+  SCROLL_SPEED_STEP,
+  clampScrollSpeed,
+} from "../hooks/useAutoScroll";
 import { api } from "../lib/api";
 
 export function meta({}: Route.MetaArgs) {
@@ -12,7 +18,7 @@ export function meta({}: Route.MetaArgs) {
 export default function ScoresNewPage() {
   const navigate = useNavigate();
   const [title, setTitle] = useState("");
-  const [speed, setSpeed] = useState(40);
+  const [speed, setSpeed] = useState(10);
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -28,7 +34,7 @@ export default function ScoresNewPage() {
     try {
       const form = new FormData();
       form.append("title", title);
-      form.append("scroll_speed", String(speed));
+      form.append("scroll_speed", String(clampScrollSpeed(speed)));
       form.append("file", file);
       const res = await api.createScore(form);
       navigate(`/scores/${res.score.id}`);
@@ -74,18 +80,31 @@ export default function ScoresNewPage() {
             </div>
             <div>
               <label className="label" htmlFor="speed">
-                初期スクロール速度（px/秒）: {speed}
+                初期スクロール速度（px/秒）
               </label>
-              <input
-                id="speed"
-                className="w-full"
-                type="range"
-                min={10}
-                max={200}
-                step={5}
-                value={speed}
-                onChange={(e) => setSpeed(Number(e.target.value))}
-              />
+              <div className="flex items-center gap-3">
+                <input
+                  id="speed"
+                  className="w-full"
+                  type="range"
+                  min={SCROLL_SPEED_MIN}
+                  max={SCROLL_SPEED_MAX}
+                  step={SCROLL_SPEED_STEP}
+                  value={speed}
+                  onChange={(e) => setSpeed(clampScrollSpeed(Number(e.target.value)))}
+                  aria-label="初期スクロール速度（スライダー）"
+                />
+                <input
+                  type="number"
+                  className="field-quiet"
+                  min={SCROLL_SPEED_MIN}
+                  max={SCROLL_SPEED_MAX}
+                  step={SCROLL_SPEED_STEP}
+                  value={speed}
+                  onChange={(e) => setSpeed(clampScrollSpeed(Number(e.target.value)))}
+                  aria-label="初期スクロール速度（数値）"
+                />
+              </div>
             </div>
             {error && <p className="text-sm text-[var(--color-warn)]">{error}</p>}
             <button className="btn btn-dark w-full" type="submit" disabled={submitting}>
