@@ -1,6 +1,6 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 
 import type { Route } from "./+types/scores._index";
 import { SiteHeader } from "../components/SiteHeader";
@@ -12,9 +12,12 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export default function ScoresIndexPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [newFolderName, setNewFolderName] = useState("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const scoresQuery = useQuery({
     queryKey: queryKeys.scores,
@@ -31,6 +34,25 @@ export default function ScoresIndexPage() {
   const loading = scoresQuery.isPending || foldersQuery.isPending;
   const error =
     scoresQuery.error?.message ?? foldersQuery.error?.message ?? null;
+
+  useEffect(() => {
+    if (openMenuId == null) return;
+
+    function onPointerDown(event: PointerEvent) {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setOpenMenuId(null);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpenMenuId(null);
+    }
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [openMenuId]);
 
   const deleteScoreMutation = useMutation({
     mutationFn: (id: number) => api.deleteScore(id),
@@ -100,6 +122,17 @@ export default function ScoresIndexPage() {
     },
   });
 
+  const renameScoreMutation = useMutation({
+    mutationFn: ({ id, title }: { id: number; title: string }) =>
+      api.updateScore(id, { title }),
+    onSuccess: (res) => {
+      queryClient.setQueryData<Score[]>(queryKeys.scores, (prev) =>
+        (prev ?? []).map((s) => (s.id === res.score.id ? res.score : s)),
+      );
+      queryClient.setQueryData(queryKeys.score(res.score.id), res.score);
+    },
+  });
+
   const unfiledScores = useMemo(
     () => scores.filter((s) => s.folder_id == null),
     [scores],
@@ -126,6 +159,7 @@ export default function ScoresIndexPage() {
   }, [scores, folders]);
 
   function onDelete(id: number) {
+    setOpenMenuId(null);
     if (!confirm("この楽譜を削除しますか？")) return;
     deleteScoreMutation.mutate(id, {
       onError: (err) => {
@@ -189,28 +223,53 @@ export default function ScoresIndexPage() {
     );
   }
 
+  function onRenameScore(score: Score) {
+    setOpenMenuId(null);
+    const name = prompt("新しい楽譜名", score.title);
+    if (name == null) return;
+    const trimmed = name.trim();
+    if (!trimmed) {
+      alert("楽譜名を入力してください");
+      return;
+    }
+    renameScoreMutation.mutate(
+      { id: score.id, title: trimmed },
+      {
+        onError: (err) => {
+          alert(err instanceof Error ? err.message : "名前の変更に失敗しました");
+        },
+      },
+    );
+  }
+
   function toggleCollapsed(key: string) {
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
   function renderScoreItem(score: Score) {
+    const menuOpen = openMenuId === score.id;
+
     return (
-      <li
-        key={score.id}
-        className="surface flex flex-wrap items-center justify-between gap-4 rounded-xl px-5 py-4"
-      >
-        <div className="min-w-0 flex-1">
-          <Link
-            to={`/scores/${score.id}`}
-            className="text-lg font-semibold hover:underline"
-          >
-            {score.title}
-          </Link>
-          <p className="mt-1 text-sm opacity-65">
-            {score.original_name} · 速度 {score.scroll_speed}px/s
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+      <li key={score.id} className={menuOpen ? "relative z-30" : "relative z-0"}>
+        <div
+          role="link"
+          tabIndex={0}
+          className="surface flex cursor-pointer items-center gap-3 rounded-xl px-5 py-4 transition hover:brightness-[0.98]"
+          onClick={() => navigate(`/scores/${score.id}`)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              navigate(`/scores/${score.id}`);
+            }
+          }}
+        >
+          <div className="min-w-0 flex-1">
+            <p className="text-lg font-semibold">{score.title}</p>
+            <p className="mt-1 text-sm opacity-65">
+              {score.original_name} · 速度 {score.scroll_speed}px/s
+            </p>
+          </div>
+
           <label className="sr-only" htmlFor={`move-${score.id}`}>
             フォルダーへ移動
           </label>
@@ -218,7 +277,11 @@ export default function ScoresIndexPage() {
             id={`move-${score.id}`}
             className="field !w-auto !py-2 text-sm"
             value={score.folder_id ?? ""}
-            onChange={(e) => onMoveScore(score.id, e.target.value)}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => {
+              event.stopPropagation();
+              onMoveScore(score.id, event.target.value);
+            }}
             aria-label="フォルダーへ移動"
           >
             <option value="">フォルダーなし</option>
@@ -228,16 +291,50 @@ export default function ScoresIndexPage() {
               </option>
             ))}
           </select>
-          <Link to={`/scores/${score.id}`} className="btn btn-dark py-2 text-sm">
-            開く
-          </Link>
-          <button
-            type="button"
-            className="btn btn-ghost py-2 text-sm !text-[var(--color-ink)] !border-[color-mix(in_oklab,var(--color-ink)_20%,transparent)]"
-            onClick={() => onDelete(score.id)}
+
+          <div
+            className="relative shrink-0"
+            ref={menuOpen ? menuRef : undefined}
+            onClick={(event) => event.stopPropagation()}
           >
-            削除
-          </button>
+            <button
+              type="button"
+              className="grid h-9 w-9 place-items-center rounded-lg text-lg leading-none text-[var(--color-ink)] transition hover:bg-[color-mix(in_oklab,var(--color-ink)_8%,transparent)]"
+              aria-label="楽譜メニュー"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() =>
+                setOpenMenuId((current) =>
+                  current === score.id ? null : score.id,
+                )
+              }
+            >
+              ⋯
+            </button>
+            {menuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full z-10 mt-1 min-w-[8.5rem] overflow-hidden rounded-lg border border-[color-mix(in_oklab,var(--color-ink)_12%,transparent)] bg-white py-1 shadow-lg"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="block w-full px-3 py-2 text-left text-sm text-[var(--color-ink)] hover:bg-[color-mix(in_oklab,var(--color-ink)_6%,transparent)]"
+                  onClick={() => onRenameScore(score)}
+                >
+                  名前変更
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="block w-full px-3 py-2 text-left text-sm text-[var(--color-warn)] hover:bg-[color-mix(in_oklab,var(--color-warn)_8%,transparent)]"
+                  onClick={() => onDelete(score.id)}
+                >
+                  削除
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </li>
     );

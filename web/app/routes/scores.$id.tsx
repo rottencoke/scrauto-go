@@ -92,6 +92,31 @@ export default function ScoreShowPage() {
     },
   });
 
+  const renameScoreMutation = useMutation({
+    mutationFn: (title: string) => api.updateScore(scoreId, { title }),
+    onSuccess: (res) => {
+      queryClient.setQueryData(queryKeys.score(scoreId), res.score);
+      queryClient.setQueryData<Score[]>(queryKeys.scores, (prev) =>
+        (prev ?? []).map((s) => (s.id === res.score.id ? res.score : s)),
+      );
+    },
+    onError: (err) => {
+      alert(err instanceof Error ? err.message : "名前の変更に失敗しました");
+    },
+  });
+
+  function onRenameScore() {
+    if (!score) return;
+    const name = prompt("新しい楽譜名", score.title);
+    if (name == null) return;
+    const trimmed = name.trim();
+    if (!trimmed) {
+      alert("楽譜名を入力してください");
+      return;
+    }
+    renameScoreMutation.mutate(trimmed);
+  }
+
   const error =
     scoreQuery.error?.message ??
     fileQuery.error?.message ??
@@ -106,18 +131,30 @@ export default function ScoreShowPage() {
             <Link to="/scores" className="text-sm text-white/70 hover:text-white">
               ← 一覧へ
             </Link>
-            <h1 className="font-display mt-1 text-3xl font-bold">
-              {score ? (
-                <>
-                  {folderName && (
-                    <span className="opacity-65">{folderName} / </span>
-                  )}
-                  {score.title}
-                </>
-              ) : (
-                "読み込み中..."
+            <div className="mt-1 flex flex-wrap items-center gap-3">
+              <h1 className="font-display text-3xl font-bold">
+                {score ? (
+                  <>
+                    {folderName && (
+                      <span className="opacity-65">{folderName} / </span>
+                    )}
+                    {score.title}
+                  </>
+                ) : (
+                  "読み込み中..."
+                )}
+              </h1>
+              {score && (
+                <button
+                  type="button"
+                  className="btn btn-ghost py-1.5 text-sm"
+                  onClick={onRenameScore}
+                  disabled={renameScoreMutation.isPending}
+                >
+                  名前変更
+                </button>
               )}
-            </h1>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-2 text-sm">
