@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 
 import type { Route } from "./+types/scores.new";
@@ -10,6 +11,7 @@ import {
   clampScrollSpeed,
 } from "../hooks/useAutoScroll";
 import { api, type Folder } from "../lib/api";
+import { queryKeys } from "../lib/query-keys";
 
 export function meta({}: Route.MetaArgs) {
   return [{ title: "新規アップロード — ScrAuto" }];
@@ -19,48 +21,42 @@ type FolderMode = "none" | "existing" | "new";
 
 export default function ScoresNewPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
   const [speed, setSpeed] = useState(10);
   const [file, setFile] = useState<File | null>(null);
-  const [folders, setFolders] = useState<Folder[]>([]);
   const [folderMode, setFolderMode] = useState<FolderMode>("none");
   const [selectedFolderId, setSelectedFolderId] = useState<number | "">("");
   const [newFolderName, setNewFolderName] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const res = await api.listFolders();
-        setFolders(res.folders);
-      } catch {
-        // folder list is optional for upload; ignore load errors here
+  const foldersQuery = useQuery({
+    queryKey: queryKeys.folders,
+    queryFn: async () => (await api.listFolders()).folders,
+  });
+  const folders = foldersQuery.data ?? [];
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      if (!file) {
+        throw new Error("ファイルを選択してください");
       }
-    })();
-  }, []);
+      if (folderMode === "existing" && selectedFolderId === "") {
+        throw new Error("フォルダーを選択してください");
+      }
+      if (folderMode === "new" && !newFolderName.trim()) {
+        throw new Error("フォルダー名を入力してください");
+      }
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!file) {
-      setError("ファイルを選択してください");
-      return;
-    }
-    if (folderMode === "existing" && selectedFolderId === "") {
-      setError("フォルダーを選択してください");
-      return;
-    }
-    if (folderMode === "new" && !newFolderName.trim()) {
-      setError("フォルダー名を入力してください");
-      return;
-    }
-    setError(null);
-    setSubmitting(true);
-    try {
       let folderId: number | undefined;
       if (folderMode === "new") {
         const created = await api.createFolder(newFolderName.trim());
         folderId = created.folder.id;
+        queryClient.setQueryData<Folder[]>(queryKeys.folders, (prev) =>
+          [...(prev ?? []), created.folder].sort((a, b) =>
+            a.name.localeCompare(b.name, "ja"),
+          ),
+        );
       } else if (folderMode === "existing" && selectedFolderId !== "") {
         folderId = selectedFolderId;
       }
@@ -72,13 +68,22 @@ export default function ScoresNewPage() {
       if (folderId != null) {
         form.append("folder_id", String(folderId));
       }
-      const res = await api.createScore(form);
+      return api.createScore(form);
+    },
+    onSuccess: (res) => {
+      queryClient.setQueryData(queryKeys.score(res.score.id), res.score);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.scores });
       navigate(`/scores/${res.score.id}`);
-    } catch (err) {
+    },
+    onError: (err) => {
       setError(err instanceof Error ? err.message : "アップロードに失敗しました");
-    } finally {
-      setSubmitting(false);
-    }
+    },
+  });
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    createMutation.mutate();
   }
 
   return (
@@ -204,8 +209,12 @@ export default function ScoresNewPage() {
               </div>
             </div>
             {error && <p className="text-sm text-[var(--color-warn)]">{error}</p>}
-            <button className="btn btn-dark w-full" type="submit" disabled={submitting}>
-              {submitting ? "アップロード中..." : "アップロード"}
+            <button
+              className="btn btn-dark w-full"
+              type="submit"
+              disabled={createMutation.isPending}
+            >
+              {createMutation.isPending ? "アップロード中..." : "アップロード"}
             </button>
           </form>
         </div>

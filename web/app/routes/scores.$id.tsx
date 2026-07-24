@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router";
 import * as pdfjs from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -13,6 +14,7 @@ import {
   useAutoScroll,
 } from "../hooks/useAutoScroll";
 import { api, type Score } from "../lib/api";
+import { queryKeys } from "../lib/query-keys";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -22,62 +24,78 @@ export function meta({}: Route.MetaArgs) {
 
 export default function ScoreShowPage() {
   const { id } = useParams();
-  const [score, setScore] = useState<Score | null>(null);
-  const [folderName, setFolderName] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const scoreId = id ?? "";
+
+  const scoreQuery = useQuery({
+    queryKey: queryKeys.score(scoreId),
+    queryFn: async () => (await api.getScore(scoreId)).score,
+    enabled: Boolean(scoreId),
+  });
+
+  const foldersQuery = useQuery({
+    queryKey: queryKeys.folders,
+    queryFn: async () => (await api.listFolders()).folders,
+    enabled: scoreQuery.data?.folder_id != null,
+  });
+
+  const fileQuery = useQuery({
+    queryKey: queryKeys.scoreFile(scoreId),
+    queryFn: ({ signal }) => api.fetchScoreFile(scoreId, signal),
+    enabled: Boolean(scoreId) && scoreQuery.isSuccess,
+    staleTime: Infinity,
+  });
+
+  const score = scoreQuery.data;
+  const folderName =
+    score?.folder_id != null
+      ? (foldersQuery.data?.find((f) => f.id === score.folder_id)?.name ?? null)
+      : null;
+
+  const objectUrl = useMemo(() => {
+    if (!fileQuery.data) return null;
+    return URL.createObjectURL(fileQuery.data);
+  }, [fileQuery.data]);
+
+  useEffect(() => {
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [objectUrl]);
+
   const { playing, togglePlaying, speed, setSpeed, scrollerProps } = useAutoScroll({
     enabled: Boolean(objectUrl),
   });
 
   useEffect(() => {
-    if (!id) return;
-    let revoked: string | null = null;
-    void (async () => {
-      try {
-        const res = await api.getScore(id);
-        setScore(res.score);
-        setSpeed(clampScrollSpeed(res.score.scroll_speed));
+    if (!score) return;
+    setSpeed(clampScrollSpeed(score.scroll_speed));
+  }, [score, setSpeed]);
 
-        let resolvedFolderName: string | null = null;
-        if (res.score.folder_id != null) {
-          const foldersRes = await api.listFolders();
-          resolvedFolderName =
-            foldersRes.folders.find((f) => f.id === res.score.folder_id)?.name ??
-            null;
-        }
-        setFolderName(resolvedFolderName);
-        document.title = resolvedFolderName
-          ? `${resolvedFolderName} / ${res.score.title} — ScrAuto`
-          : `${res.score.title} — ScrAuto`;
+  useEffect(() => {
+    if (!score) return;
+    document.title = folderName
+      ? `${folderName} / ${score.title} — ScrAuto`
+      : `${score.title} — ScrAuto`;
+  }, [score, folderName]);
 
-        const fileRes = await fetch(api.scoreFileUrl(id), {
-          headers: api.authHeaders(),
-          credentials: "include",
-        });
-        if (!fileRes.ok) throw new Error("ファイルの取得に失敗しました");
-        const blob = await fileRes.blob();
-        const url = URL.createObjectURL(blob);
-        revoked = url;
-        setObjectUrl(url);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "読み込みに失敗しました");
-      }
-    })();
-    return () => {
-      if (revoked) URL.revokeObjectURL(revoked);
-    };
-  }, [id, setSpeed]);
-
-  async function saveSpeed() {
-    if (!id) return;
-    try {
-      const res = await api.updateScore(id, { scroll_speed: speed });
-      setScore(res.score);
-    } catch (err) {
+  const saveSpeedMutation = useMutation({
+    mutationFn: () => api.updateScore(scoreId, { scroll_speed: speed }),
+    onSuccess: (res) => {
+      queryClient.setQueryData(queryKeys.score(scoreId), res.score);
+      queryClient.setQueryData<Score[]>(queryKeys.scores, (prev) =>
+        (prev ?? []).map((s) => (s.id === res.score.id ? res.score : s)),
+      );
+    },
+    onError: (err) => {
       alert(err instanceof Error ? err.message : "保存に失敗しました");
-    }
-  }
+    },
+  });
+
+  const error =
+    scoreQuery.error?.message ??
+    fileQuery.error?.message ??
+    null;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden text-white">
@@ -125,7 +143,12 @@ export default function ScoreShowPage() {
               />
               <span className="text-xs tabular-nums text-white/55">px/s</span>
             </label>
-            <button type="button" className="btn btn-ghost py-2 text-sm" onClick={() => void saveSpeed()}>
+            <button
+              type="button"
+              className="btn btn-ghost py-2 text-sm"
+              onClick={() => saveSpeedMutation.mutate()}
+              disabled={saveSpeedMutation.isPending}
+            >
               速度を保存
             </button>
             <button

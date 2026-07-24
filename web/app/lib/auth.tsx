@@ -2,13 +2,13 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
-  useState,
   type ReactNode,
 } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, setToken, type User } from "./api";
+import { queryKeys } from "./query-keys";
 
 type AuthContextValue = {
   user: User | null;
@@ -16,55 +16,84 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  refresh: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+async function fetchMe(): Promise<User | null> {
+  try {
+    return await api.me();
+  } catch {
+    setToken(null);
+    return null;
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
 
-  const refresh = useCallback(async () => {
-    try {
-      const me = await api.me();
-      setUser(me);
-    } catch {
-      setUser(null);
+  const meQuery = useQuery({
+    queryKey: queryKeys.me,
+    queryFn: fetchMe,
+    retry: false,
+    staleTime: 60_000,
+  });
+
+  const loginMutation = useMutation({
+    mutationFn: ({ email, password }: { email: string; password: string }) =>
+      api.login(email, password),
+    onSuccess: (res) => {
+      setToken(res.token);
+      queryClient.setQueryData(queryKeys.me, res.user);
+    },
+  });
+
+  const signupMutation = useMutation({
+    mutationFn: ({ email, password }: { email: string; password: string }) =>
+      api.signup(email, password),
+    onSuccess: (res) => {
+      setToken(res.token);
+      queryClient.setQueryData(queryKeys.me, res.user);
+    },
+  });
+
+  const logoutMutation = useMutation({
+    mutationFn: () => api.logout(),
+    onSettled: async () => {
       setToken(null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      queryClient.setQueryData(queryKeys.me, null);
+      await queryClient.resetQueries({ queryKey: queryKeys.scores });
+      await queryClient.resetQueries({ queryKey: queryKeys.folders });
+    },
+  });
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const login = useCallback(
+    async (email: string, password: string) => {
+      await loginMutation.mutateAsync({ email, password });
+    },
+    [loginMutation],
+  );
 
-  const login = useCallback(async (email: string, password: string) => {
-    const res = await api.login(email, password);
-    setToken(res.token);
-    setUser(res.user);
-  }, []);
-
-  const signup = useCallback(async (email: string, password: string) => {
-    const res = await api.signup(email, password);
-    setToken(res.token);
-    setUser(res.user);
-  }, []);
+  const signup = useCallback(
+    async (email: string, password: string) => {
+      await signupMutation.mutateAsync({ email, password });
+    },
+    [signupMutation],
+  );
 
   const logout = useCallback(async () => {
-    try {
-      await api.logout();
-    } finally {
-      setToken(null);
-      setUser(null);
-    }
-  }, []);
+    await logoutMutation.mutateAsync();
+  }, [logoutMutation]);
 
   const value = useMemo(
-    () => ({ user, loading, login, signup, logout, refresh }),
-    [user, loading, login, signup, logout, refresh],
+    () => ({
+      user: meQuery.data ?? null,
+      loading: meQuery.isPending,
+      login,
+      signup,
+      logout,
+    }),
+    [meQuery.data, meQuery.isPending, login, signup, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

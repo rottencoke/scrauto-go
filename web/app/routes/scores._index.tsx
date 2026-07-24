@@ -1,39 +1,104 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 
 import type { Route } from "./+types/scores._index";
 import { SiteHeader } from "../components/SiteHeader";
 import { api, type Folder, type Score } from "../lib/api";
+import { queryKeys } from "../lib/query-keys";
 
 export function meta({}: Route.MetaArgs) {
   return [{ title: "楽譜一覧 — ScrAuto" }];
 }
 
 export default function ScoresIndexPage() {
-  const [scores, setScores] = useState<Score[]>([]);
-  const [folders, setFolders] = useState<Folder[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [newFolderName, setNewFolderName] = useState("");
-  const [addingFolder, setAddingFolder] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const [scoreRes, folderRes] = await Promise.all([
-          api.listScores(),
-          api.listFolders(),
-        ]);
-        setScores(scoreRes.scores);
-        setFolders(folderRes.folders);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "取得に失敗しました");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+  const scoresQuery = useQuery({
+    queryKey: queryKeys.scores,
+    queryFn: async () => (await api.listScores()).scores,
+  });
+
+  const foldersQuery = useQuery({
+    queryKey: queryKeys.folders,
+    queryFn: async () => (await api.listFolders()).folders,
+  });
+
+  const scores = scoresQuery.data ?? [];
+  const folders = foldersQuery.data ?? [];
+  const loading = scoresQuery.isPending || foldersQuery.isPending;
+  const error =
+    scoresQuery.error?.message ?? foldersQuery.error?.message ?? null;
+
+  const deleteScoreMutation = useMutation({
+    mutationFn: (id: number) => api.deleteScore(id),
+    onSuccess: (_data, id) => {
+      queryClient.setQueryData<Score[]>(queryKeys.scores, (prev) =>
+        (prev ?? []).filter((s) => s.id !== id),
+      );
+      void queryClient.removeQueries({ queryKey: queryKeys.score(id) });
+      void queryClient.removeQueries({ queryKey: queryKeys.scoreFile(id) });
+    },
+  });
+
+  const createFolderMutation = useMutation({
+    mutationFn: (name: string) => api.createFolder(name),
+    onSuccess: (res) => {
+      queryClient.setQueryData<Folder[]>(queryKeys.folders, (prev) =>
+        [...(prev ?? []), res.folder].sort((a, b) =>
+          a.name.localeCompare(b.name, "ja"),
+        ),
+      );
+      setNewFolderName("");
+    },
+  });
+
+  const deleteFolderMutation = useMutation({
+    mutationFn: (folder: Folder) => api.deleteFolder(folder.id),
+    onSuccess: (_data, folder) => {
+      queryClient.setQueryData<Folder[]>(queryKeys.folders, (prev) =>
+        (prev ?? []).filter((f) => f.id !== folder.id),
+      );
+      queryClient.setQueryData<Score[]>(queryKeys.scores, (prev) =>
+        (prev ?? []).map((s) =>
+          s.folder_id === folder.id ? { ...s, folder_id: null } : s,
+        ),
+      );
+    },
+  });
+
+  const renameFolderMutation = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) =>
+      api.updateFolder(id, name),
+    onSuccess: (res) => {
+      queryClient.setQueryData<Folder[]>(queryKeys.folders, (prev) =>
+        (prev ?? [])
+          .map((f) => (f.id === res.folder.id ? res.folder : f))
+          .sort((a, b) => a.name.localeCompare(b.name, "ja")),
+      );
+    },
+  });
+
+  const moveScoreMutation = useMutation({
+    mutationFn: ({
+      scoreId,
+      value,
+    }: {
+      scoreId: number;
+      value: string;
+    }) =>
+      value === ""
+        ? api.updateScore(scoreId, { clear_folder: true })
+        : api.updateScore(scoreId, { folder_id: Number(value) }),
+    onSuccess: (res) => {
+      queryClient.setQueryData<Score[]>(queryKeys.scores, (prev) =>
+        (prev ?? []).map((s) => (s.id === res.score.id ? res.score : s)),
+      );
+      queryClient.setQueryData(queryKeys.score(res.score.id), res.score);
+    },
+  });
 
   const unfiledScores = useMemo(
     () => scores.filter((s) => s.folder_id == null),
@@ -48,11 +113,7 @@ export default function ScoresIndexPage() {
     for (const score of scores) {
       if (score.folder_id == null) continue;
       const list = map.get(score.folder_id);
-      if (list) {
-        list.push(score);
-      } else {
-        // orphaned folder_id — show under unfiled via separate handling
-      }
+      if (list) list.push(score);
     }
     return map;
   }, [scores, folders]);
@@ -64,35 +125,27 @@ export default function ScoresIndexPage() {
     );
   }, [scores, folders]);
 
-  async function onDelete(id: number) {
+  function onDelete(id: number) {
     if (!confirm("この楽譜を削除しますか？")) return;
-    try {
-      await api.deleteScore(id);
-      setScores((prev) => prev.filter((s) => s.id !== id));
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "削除に失敗しました");
-    }
+    deleteScoreMutation.mutate(id, {
+      onError: (err) => {
+        alert(err instanceof Error ? err.message : "削除に失敗しました");
+      },
+    });
   }
 
-  async function onAddFolder(e: FormEvent) {
+  function onAddFolder(e: FormEvent) {
     e.preventDefault();
     const name = newFolderName.trim();
     if (!name) return;
-    setAddingFolder(true);
-    try {
-      const res = await api.createFolder(name);
-      setFolders((prev) =>
-        [...prev, res.folder].sort((a, b) => a.name.localeCompare(b.name, "ja")),
-      );
-      setNewFolderName("");
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "フォルダーの作成に失敗しました");
-    } finally {
-      setAddingFolder(false);
-    }
+    createFolderMutation.mutate(name, {
+      onError: (err) => {
+        alert(err instanceof Error ? err.message : "フォルダーの作成に失敗しました");
+      },
+    });
   }
 
-  async function onDeleteFolder(folder: Folder) {
+  function onDeleteFolder(folder: Folder) {
     if (
       !confirm(
         `フォルダー「${folder.name}」を削除しますか？\n中の楽譜はフォルダーなしに移ります。`,
@@ -100,20 +153,14 @@ export default function ScoresIndexPage() {
     ) {
       return;
     }
-    try {
-      await api.deleteFolder(folder.id);
-      setFolders((prev) => prev.filter((f) => f.id !== folder.id));
-      setScores((prev) =>
-        prev.map((s) =>
-          s.folder_id === folder.id ? { ...s, folder_id: null } : s,
-        ),
-      );
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "フォルダーの削除に失敗しました");
-    }
+    deleteFolderMutation.mutate(folder, {
+      onError: (err) => {
+        alert(err instanceof Error ? err.message : "フォルダーの削除に失敗しました");
+      },
+    });
   }
 
-  async function onRenameFolder(folder: Folder) {
+  function onRenameFolder(folder: Folder) {
     const name = prompt("新しいフォルダー名", folder.name);
     if (name == null) return;
     const trimmed = name.trim();
@@ -121,35 +168,25 @@ export default function ScoresIndexPage() {
       alert("フォルダー名を入力してください");
       return;
     }
-    try {
-      const res = await api.updateFolder(folder.id, trimmed);
-      setFolders((prev) =>
-        prev
-          .map((f) => (f.id === folder.id ? res.folder : f))
-          .sort((a, b) => a.name.localeCompare(b.name, "ja")),
-      );
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "名前の変更に失敗しました");
-    }
+    renameFolderMutation.mutate(
+      { id: folder.id, name: trimmed },
+      {
+        onError: (err) => {
+          alert(err instanceof Error ? err.message : "名前の変更に失敗しました");
+        },
+      },
+    );
   }
 
-  async function onMoveScore(scoreId: number, value: string) {
-    try {
-      if (value === "") {
-        const res = await api.updateScore(scoreId, { clear_folder: true });
-        setScores((prev) =>
-          prev.map((s) => (s.id === scoreId ? res.score : s)),
-        );
-      } else {
-        const folderId = Number(value);
-        const res = await api.updateScore(scoreId, { folder_id: folderId });
-        setScores((prev) =>
-          prev.map((s) => (s.id === scoreId ? res.score : s)),
-        );
-      }
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "移動に失敗しました");
-    }
+  function onMoveScore(scoreId: number, value: string) {
+    moveScoreMutation.mutate(
+      { scoreId, value },
+      {
+        onError: (err) => {
+          alert(err instanceof Error ? err.message : "移動に失敗しました");
+        },
+      },
+    );
   }
 
   function toggleCollapsed(key: string) {
@@ -181,7 +218,7 @@ export default function ScoresIndexPage() {
             id={`move-${score.id}`}
             className="field !w-auto !py-2 text-sm"
             value={score.folder_id ?? ""}
-            onChange={(e) => void onMoveScore(score.id, e.target.value)}
+            onChange={(e) => onMoveScore(score.id, e.target.value)}
             aria-label="フォルダーへ移動"
           >
             <option value="">フォルダーなし</option>
@@ -197,7 +234,7 @@ export default function ScoresIndexPage() {
           <button
             type="button"
             className="btn btn-ghost py-2 text-sm !text-[var(--color-ink)] !border-[color-mix(in_oklab,var(--color-ink)_20%,transparent)]"
-            onClick={() => void onDelete(score.id)}
+            onClick={() => onDelete(score.id)}
           >
             削除
           </button>
@@ -233,14 +270,14 @@ export default function ScoresIndexPage() {
               <button
                 type="button"
                 className="btn btn-ghost py-1.5 text-sm !text-[var(--color-ink)] !border-[color-mix(in_oklab,var(--color-ink)_20%,transparent)]"
-                onClick={() => void onRenameFolder(folder)}
+                onClick={() => onRenameFolder(folder)}
               >
                 名前変更
               </button>
               <button
                 type="button"
                 className="btn btn-ghost py-1.5 text-sm !text-[var(--color-ink)] !border-[color-mix(in_oklab,var(--color-ink)_20%,transparent)]"
-                onClick={() => void onDeleteFolder(folder)}
+                onClick={() => onDeleteFolder(folder)}
               >
                 削除
               </button>
@@ -277,7 +314,7 @@ export default function ScoresIndexPage() {
 
         <form
           className="surface mb-8 flex flex-wrap items-end gap-3 rounded-xl px-5 py-4"
-          onSubmit={(e) => void onAddFolder(e)}
+          onSubmit={onAddFolder}
         >
           <div className="min-w-[12rem] flex-1">
             <label className="label" htmlFor="new-folder">
@@ -294,9 +331,9 @@ export default function ScoresIndexPage() {
           <button
             type="submit"
             className="btn btn-dark"
-            disabled={addingFolder || !newFolderName.trim()}
+            disabled={createFolderMutation.isPending || !newFolderName.trim()}
           >
-            {addingFolder ? "追加中..." : "追加"}
+            {createFolderMutation.isPending ? "追加中..." : "追加"}
           </button>
         </form>
 

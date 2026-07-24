@@ -121,6 +121,20 @@ export const api = {
   deleteScore: (id: string | number) =>
     request<{ ok: boolean }>(`/api/scores/${id}`, { method: "DELETE" }),
   scoreFileUrl: (id: string | number) => `${API_BASE}/api/scores/${id}/file`,
+  fetchScoreFile: async (id: string | number, signal?: AbortSignal) => {
+    const headers: Record<string, string> = {};
+    const token = getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${API_BASE}/api/scores/${id}/file`, {
+      headers,
+      credentials: "include",
+      signal,
+    });
+    if (!res.ok) {
+      throw new Error("ファイルの取得に失敗しました");
+    }
+    return res.blob();
+  },
   authHeaders: (): Record<string, string> => {
     const token = getToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
