@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Syne", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Figtree", ui-sans-serif, system-ui, sans-serif;
+  --color-ink: #0b1d26;
+  --color-ink-soft: #14333d;
+  --color-mist: #e8eef0;
+  --color-paper: #f4f7f6;
+  --color-accent: #1fa8a0;
+  --color-accent-deep: #157e78;
+  --color-warn: #c45c26;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #1a4a52 0%, transparent 55%),
+    radial-gradient(900px 500px at 90% 0%, #0f2f3a 0%, transparent 50%),
+    linear-gradient(165deg, #0b1d26 0%, #102a33 45%, #0d2229 100%);
+  color-scheme: dark;
+}
+
+body {
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.surface {
+  background: color-mix(in oklab, white 92%, #d7e4e2);
+  color: var(--color-ink);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.5rem;
+  padding: 0.7rem 1.15rem;
+  font-weight: 600;
+  transition: transform 160ms ease, background 160ms ease, opacity 160ms ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn-primary {
+  background: var(--color-accent);
+  color: #062a28;
+}
+
+.btn-primary:hover {
+  background: color-mix(in oklab, var(--color-accent) 85%, white);
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid color-mix(in oklab, white 35%, transparent);
+  color: white;
+}
+
+.btn-ghost:hover {
+  background: color-mix(in oklab, white 10%, transparent);
+}
+
+.btn-dark {
+  background: var(--color-ink);
+  color: white;
+}
+
+.field {
+  width: 100%;
+  border: 1px solid color-mix(in oklab, var(--color-ink) 18%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.7rem 0.85rem;
+  background: white;
+  color: var(--color-ink);
+}
+
+.field:focus {
+  outline: 2px solid color-mix(in oklab, var(--color-accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}

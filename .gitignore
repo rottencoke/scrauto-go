@@ -1,0 +1,15 @@
+.env
+node_modules/
+dist/
+tmp/
+*.exe
+*.log
+.DS_Store
+uploads/
+server/tmp/
+web/.react-router/
+web/build/
+infra/.terraform/
+infra/*.tfstate*
+infra/*.tfvars
+*.pem

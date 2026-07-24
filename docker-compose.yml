@@ -1,0 +1,55 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-scrauto}
+      MYSQL_USER: ${MYSQL_USER:-scrauto}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-scrautopass}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-rootpass}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile.dev
+    environment:
+      SERVER_PORT: ${SERVER_PORT:-8080}
+      DB_DSN: "${MYSQL_USER:-scrauto}:${MYSQL_PASSWORD:-scrautopass}@tcp(mysql:3306)/${MYSQL_DATABASE:-scrauto}?charset=utf8mb4&parseTime=True&loc=Local"
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-use-long-random-string}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./server:/app
+      - uploads_data:/data/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile.dev
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web:/app
+      - web_node_modules:/app/node_modules
+    depends_on:
+      - server
+
+volumes:
+  mysql_data:
+  uploads_data:
+  web_node_modules:
