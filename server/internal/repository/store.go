@@ -30,6 +30,39 @@ func (s *Store) FindUserByID(id uint) (*model.User, error) {
 	return &user, nil
 }
 
+func (s *Store) ListFolders(userID uint) ([]model.Folder, error) {
+	var folders []model.Folder
+	err := s.DB.Where("user_id = ?", userID).Order("name asc").Find(&folders).Error
+	return folders, err
+}
+
+func (s *Store) CreateFolder(folder *model.Folder) error {
+	return s.DB.Create(folder).Error
+}
+
+func (s *Store) FindFolder(userID, id uint) (*model.Folder, error) {
+	var folder model.Folder
+	if err := s.DB.Where("user_id = ? AND id = ?", userID, id).First(&folder).Error; err != nil {
+		return nil, err
+	}
+	return &folder, nil
+}
+
+func (s *Store) UpdateFolder(folder *model.Folder) error {
+	return s.DB.Save(folder).Error
+}
+
+func (s *Store) DeleteFolder(folder *model.Folder) error {
+	return s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.Score{}).
+			Where("user_id = ? AND folder_id = ?", folder.UserID, folder.ID).
+			Update("folder_id", nil).Error; err != nil {
+			return err
+		}
+		return tx.Delete(folder).Error
+	})
+}
+
 func (s *Store) ListScores(userID uint) ([]model.Score, error) {
 	var scores []model.Score
 	err := s.DB.Where("user_id = ?", userID).Order("created_at desc").Find(&scores).Error
@@ -50,6 +83,10 @@ func (s *Store) FindScore(userID, id uint) (*model.Score, error) {
 
 func (s *Store) UpdateScore(score *model.Score) error {
 	return s.DB.Save(score).Error
+}
+
+func (s *Store) SetScoreFolder(score *model.Score, folderID *uint) error {
+	return s.DB.Model(score).Update("folder_id", folderID).Error
 }
 
 func (s *Store) DeleteScore(score *model.Score) error {

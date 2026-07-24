@@ -116,9 +116,6 @@ export default function ScoreShowPage() {
             </button>
           </div>
         </div>
-        <p className="mb-3 shrink-0 text-sm text-white/55">
-          楽譜をタップで開始/停止 · ホイールで位置調整（止めると自動スクロール再開）
-        </p>
 
         {error && <p className="mb-4 shrink-0 text-[var(--color-warn)]">{error}</p>}
 

@@ -115,8 +115,25 @@ func (h *ScoreHandler) Create(c *gin.Context) {
 		}
 	}
 
+	var folderID *uint
+	if v := strings.TrimSpace(c.PostForm("folder_id")); v != "" {
+		id, err := parseID(v)
+		if err != nil {
+			_ = os.Remove(destPath)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid folder_id"})
+			return
+		}
+		if _, err := h.Store.FindFolder(userID, id); err != nil {
+			_ = os.Remove(destPath)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "folder not found"})
+			return
+		}
+		folderID = &id
+	}
+
 	score := &model.Score{
 		UserID:       userID,
+		FolderID:     folderID,
 		Title:        title,
 		FilePath:     storedName,
 		MimeType:     mime,
@@ -162,6 +179,8 @@ func (h *ScoreHandler) Update(c *gin.Context) {
 	var body struct {
 		Title       *string  `json:"title"`
 		ScrollSpeed *float64 `json:"scroll_speed"`
+		FolderID    *uint    `json:"folder_id"`
+		ClearFolder bool     `json:"clear_folder"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -182,10 +201,28 @@ func (h *ScoreHandler) Update(c *gin.Context) {
 		}
 		score.ScrollSpeed = *body.ScrollSpeed
 	}
+	folderChanged := false
+	if body.ClearFolder {
+		score.FolderID = nil
+		folderChanged = true
+	} else if body.FolderID != nil {
+		if _, err := h.Store.FindFolder(userID, *body.FolderID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "folder not found"})
+			return
+		}
+		score.FolderID = body.FolderID
+		folderChanged = true
+	}
 	score.UpdatedAt = time.Now()
 	if err := h.Store.UpdateScore(score); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update"})
 		return
+	}
+	if folderChanged {
+		if err := h.Store.SetScoreFolder(score, score.FolderID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update"})
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"score": score})
 }

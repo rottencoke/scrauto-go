@@ -5,9 +5,18 @@ export type User = {
   email: string;
 };
 
+export type Folder = {
+  id: number;
+  user_id: number;
+  name: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Score = {
   id: number;
   user_id: number;
+  folder_id: number | null;
   title: string;
   mime_type: string;
   original_name: string;
@@ -78,6 +87,19 @@ export const api = {
   logout: () =>
     request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   me: () => request<User>("/api/auth/me"),
+  listFolders: () => request<{ folders: Folder[] }>("/api/folders"),
+  createFolder: (name: string) =>
+    request<{ folder: Folder }>("/api/folders", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  updateFolder: (id: string | number, name: string) =>
+    request<{ folder: Folder }>(`/api/folders/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
+  deleteFolder: (id: string | number) =>
+    request<{ ok: boolean }>(`/api/folders/${id}`, { method: "DELETE" }),
   listScores: () => request<{ scores: Score[] }>("/api/scores"),
   getScore: (id: string | number) =>
     request<{ score: Score }>(`/api/scores/${id}`),
@@ -85,7 +107,12 @@ export const api = {
     request<{ score: Score }>("/api/scores", { method: "POST", body: form }),
   updateScore: (
     id: string | number,
-    body: { title?: string; scroll_speed?: number },
+    body: {
+      title?: string;
+      scroll_speed?: number;
+      folder_id?: number;
+      clear_folder?: boolean;
+    },
   ) =>
     request<{ score: Score }>(`/api/scores/${id}`, {
       method: "PATCH",

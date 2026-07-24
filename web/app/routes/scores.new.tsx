@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 
 import type { Route } from "./+types/scores.new";
@@ -9,19 +9,36 @@ import {
   SCROLL_SPEED_STEP,
   clampScrollSpeed,
 } from "../hooks/useAutoScroll";
-import { api } from "../lib/api";
+import { api, type Folder } from "../lib/api";
 
 export function meta({}: Route.MetaArgs) {
   return [{ title: "新規アップロード — ScrAuto" }];
 }
+
+type FolderMode = "none" | "existing" | "new";
 
 export default function ScoresNewPage() {
   const navigate = useNavigate();
   const [title, setTitle] = useState("");
   const [speed, setSpeed] = useState(10);
   const [file, setFile] = useState<File | null>(null);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [folderMode, setFolderMode] = useState<FolderMode>("none");
+  const [selectedFolderId, setSelectedFolderId] = useState<number | "">("");
+  const [newFolderName, setNewFolderName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await api.listFolders();
+        setFolders(res.folders);
+      } catch {
+        // folder list is optional for upload; ignore load errors here
+      }
+    })();
+  }, []);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -29,13 +46,32 @@ export default function ScoresNewPage() {
       setError("ファイルを選択してください");
       return;
     }
+    if (folderMode === "existing" && selectedFolderId === "") {
+      setError("フォルダーを選択してください");
+      return;
+    }
+    if (folderMode === "new" && !newFolderName.trim()) {
+      setError("フォルダー名を入力してください");
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
+      let folderId: number | undefined;
+      if (folderMode === "new") {
+        const created = await api.createFolder(newFolderName.trim());
+        folderId = created.folder.id;
+      } else if (folderMode === "existing" && selectedFolderId !== "") {
+        folderId = selectedFolderId;
+      }
+
       const form = new FormData();
       form.append("title", title);
       form.append("scroll_speed", String(clampScrollSpeed(speed)));
       form.append("file", file);
+      if (folderId != null) {
+        form.append("folder_id", String(folderId));
+      }
       const res = await api.createScore(form);
       navigate(`/scores/${res.score.id}`);
     } catch (err) {
@@ -78,6 +114,67 @@ export default function ScoresNewPage() {
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               />
             </div>
+            <fieldset>
+              <legend className="label">フォルダー（任意）</legend>
+              <div className="mt-2 space-y-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="folderMode"
+                    checked={folderMode === "none"}
+                    onChange={() => setFolderMode("none")}
+                  />
+                  フォルダーに入れない
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="folderMode"
+                    checked={folderMode === "existing"}
+                    onChange={() => setFolderMode("existing")}
+                    disabled={folders.length === 0}
+                  />
+                  既存フォルダーを選択
+                </label>
+                {folderMode === "existing" && (
+                  <select
+                    className="field"
+                    value={selectedFolderId}
+                    onChange={(e) =>
+                      setSelectedFolderId(
+                        e.target.value === "" ? "" : Number(e.target.value),
+                      )
+                    }
+                    required
+                  >
+                    <option value="">選択してください</option>
+                    {folders.map((folder) => (
+                      <option key={folder.id} value={folder.id}>
+                        {folder.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="folderMode"
+                    checked={folderMode === "new"}
+                    onChange={() => setFolderMode("new")}
+                  />
+                  新しいフォルダーを作成して入れる
+                </label>
+                {folderMode === "new" && (
+                  <input
+                    className="field"
+                    placeholder="フォルダー名"
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    required
+                  />
+                )}
+              </div>
+            </fieldset>
             <div>
               <label className="label" htmlFor="speed">
                 初期スクロール速度（px/秒）

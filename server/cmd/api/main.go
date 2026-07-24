@@ -30,12 +30,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("db: %v", err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.Score{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Folder{}, &model.Score{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
 	store := &repository.Store{DB: db}
 	authHandler := &handler.AuthHandler{Store: store, JWTSecret: cfg.JWTSecret}
+	folderHandler := &handler.FolderHandler{Store: store}
 	scoreHandler := &handler.ScoreHandler{Store: store, UploadDir: cfg.UploadDir}
 
 	r := gin.Default()
@@ -62,6 +63,10 @@ func main() {
 		auth.Use(middleware.Auth(cfg.JWTSecret))
 		{
 			auth.GET("/auth/me", authHandler.Me)
+			auth.GET("/folders", folderHandler.List)
+			auth.POST("/folders", folderHandler.Create)
+			auth.PATCH("/folders/:id", folderHandler.Update)
+			auth.DELETE("/folders/:id", folderHandler.Delete)
 			auth.GET("/scores", scoreHandler.List)
 			auth.POST("/scores", scoreHandler.Create)
 			auth.GET("/scores/:id", scoreHandler.Get)
